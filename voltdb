@@ -1,0 +1,453 @@
+OS : CentOS Linux release 7.7.1908 (Core)
+
+[Kubernetes MASTER NODE 환경 구성]
+vi /etc/hosts
+172.16.0.214	kuber1m
+172.16.1.55	kuber1n
+172.16.1.31	kuber3n
+172.16.3.80	kuber4n
+
+selinux disable 하는 명령어
+setenforce 0
+sed -i --follow-symlinks 's/SELINUX=enforcing/SELINUX=disabled/g' /etc/sysconfig/selinux
+init 6
+
+selinux 상태 확인 명령어
+sestatus
+getenforce
+
+리눅스 방화벽 disable 하는 명령어
+systemctl stop firewalld && systemctl disable firewalld && systemctl mask --now firewalld
+
+pod간의 통신을 위한 모듈 관련 설정(br_netfilter)
+cat <<EOF >  /etc/sysctl.d/k8s.conf
+net.bridge.bridge-nf-call-ip6tables = 1
+net.bridge.bridge-nf-call-iptables = 1
+EOF
+
+추가한 설정 적용해주는 명령어
+sysctl --system
+
+스왑중지
+swapoff -a
+/etc/fstab 파일의 swap부분 주석처리
+#/dev/mapper/centos-swap swap                    swap    defaults        0 0
+
+kubernetes 저장소 정보 추가
+cat <<EOF > /etc/yum.repos.d/kubernetes.repo
+[kubernetes]
+name=Kubernetes
+baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-x86_64
+enabled=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=https://packages.cloud.google.com/yum/doc/yum-key.gpg https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+EOF
+
+kubeadm, docker install
+yum install kubeadm docker -y
+systemctl enable kubelet && systemctl start kubelet 
+systemctl enable docker && systemctl start docker
+
+kubernete master node 초기화
+kubeadm init
+
+kubeadm init 으로 초기화를 하게 되면 마지막에 아래와 같이 토큰을 생성해주는데 이 토큰은 node join시 필요하다.
+kubeadm join 172.16.0.214:6443 --token hg5vlq.af1kg0od698goe3u --discovery-token-ca-cert-hash XXXXX
+
+root 계정으로 클러스터 관리할 수 있게 생성된 자격증명을 복사
+mkdir -p $HOME/.kube
+cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+chown $(id -u):$(id -g) $HOME/.kube/config
+
+[root@kuber1m ~]# kubectl get nodes
+NAME      STATUS     ROLES    AGE   VERSION
+kuber1m   NotReady   master   50s   v1.17.3
+
+pod network를 생성
+export kubever=$(kubectl version | base64 | tr -d '\n')
+kubectl apply -f "https://cloud.weave.works/k8s/net?k8s-version=$kubever"
+
+pod network 생성이후 master가 NotReady -> Ready 로 변경됨을 확인할 수 있다.
+[root@kuber1m ~]# kubectl get nodes
+NAME      STATUS   ROLES    AGE     VERSION
+kuber1m   Ready    master   3m25s   v1.17.3
+
+======================================================================================================================
+[Kubernetes WORKER NODE 환경 구성]
+vi /etc/hosts
+172.16.0.214	kuber1m
+172.16.1.55	kuber1n
+172.16.1.31	kuber3n
+172.16.3.80	kuber4n
+
+selinux disable 하는 명령어
+setenforce 0
+sed -i --follow-symlinks 's/SELINUX=enforcing/SELINUX=disabled/g' /etc/sysconfig/selinux
+init 6
+
+selinux 상태 확인 명령어
+sestatus
+getenforce
+
+리눅스 방화벽 disable 하는 명령어
+systemctl stop firewalld && systemctl disable firewalld && systemctl mask --now firewalld
+
+pod간의 통신을 위한 모듈 관련 설정(br_netfilter)
+cat <<EOF >  /etc/sysctl.d/k8s.conf
+net.bridge.bridge-nf-call-ip6tables = 1
+net.bridge.bridge-nf-call-iptables = 1
+EOF
+
+추가한 설정 적용해주는 명령어
+sysctl --system
+
+스왑중지
+swapoff -a
+/etc/fstab 파일의 swap부분 주석처리
+#/dev/mapper/centos-swap swap                    swap    defaults        0 0
+
+kubernetes 저장소 정보 추가
+cat <<EOF > /etc/yum.repos.d/kubernetes.repo
+[kubernetes]
+name=Kubernetes
+baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-x86_64
+enabled=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=https://packages.cloud.google.com/yum/doc/yum-key.gpg https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+EOF
+
+kubeadm, docker install
+yum install kubeadm docker -y 
+systemctl enable kubelet && systemctl start kubelet
+systemctl enable docker && systemctl start docker
+
+mater node에 worker node join
+kubeadm join 172.16.0.214:6443 --token hg5vlq.af1kg0od698goe3u --discovery-token-ca-cert-hash XXXXXX
+[root@kuber1m ~]# kubectl get nodes
+NAME      STATUS   ROLES    AGE     VERSION
+kuber1m   Ready    master   26h    v1.17.3
+kuber1n   Ready    <none>   26h    v1.17.3
+kuber3n   Ready    <none>   26h    v1.17.3
+kuber4n   Ready    <none>   26h    v1.17.3
+
+[root@kuber1m ~]# kubectl cluster-info
+Kubernetes master is running at https://172.16.0.214:6443
+KubeDNS is running at https://172.16.0.214:6443/api/v1/namespaces/kube-system/services/kube-dns:dns/proxy
+
+==========================================================================================================
+[Master node NFS Server install]
+yum install nfs-utils nfs-utils-lib -y
+systemctl enable nfs-server.service
+systemctl start nfs-server.service
+
+NFS mount 허용할 디렉터리 생성 및 권한부여
+mkdir /srv/nfs/kubedata -p
+chown nobody: /srv/nfs/kubedata
+
+NFS Server의 마운트디렉토리에 대한 설정
+vi /etc/exports
+/srv/nfs/kubedata *(rw,sync,no_subtree_check,no_root_squash,no_all_squash,insecure)
+exportfs -rav
+exportfs -v
+
+
+[worker node NFS client install]
+yum install nfs-utils nfs-utils-lib -y 
+systemctl enable nfs-client.target
+systemctl start nfs-client.target
+
+어떤 worker node에 pod가 올라갈지 모르니까 전체의 worker node에서 NFS로 master node와 접근이 가능해야됨
+worker node에서 master node로 NFS 정상적으로 연결되는지 확인
+mount -t nfs 192.168.11.102:/srv/nfs/kubedata /tmp
+
+==========================================================================================================
+[Master node ]
+
+Statefulset 환경을 NFS로 설정하기 위한 yaml 파일 다운로드
+wget https://raw.githubusercontent.com/sangkyu-test/voltdb/master/rbac.yaml
+wget https://raw.githubusercontent.com/sangkyu-test/voltdb/master/class.yaml
+wget https://raw.githubusercontent.com/sangkyu-test/voltdb/master/deployment.yaml
+wget https://raw.githubusercontent.com/sangkyu-test/voltdb/master/pvc-nfs.yaml
+wget https://raw.githubusercontent.com/sangkyu-test/voltdb/master/4-busybox-pv-hostpath.yaml
+
+RBAC(Role-based access control) 생성
+kubectl create -f rbac.yaml
+
+생성된 RBAC 확인
+[root@kuber1m yaml]# kubectl get clusterrole,clusterrolebinding,role,rolebinding | grep nfs
+clusterrole.rbac.authorization.k8s.io/nfs-client-provisioner-runner                                          4s
+clusterrolebinding.rbac.authorization.k8s.io/run-nfs-client-provisioner                             4s
+role.rbac.authorization.k8s.io/leader-locking-nfs-client-provisioner   4s
+rolebinding.rbac.authorization.k8s.io/leader-locking-nfs-client-provisioner   4s
+
+storageClassName을 지정
+kubectl create -f class.yaml
+
+nfs-server의 IP를 지정해주고 마운트위치를 지정
+kubectl create -f deployment.yaml
+
+storageClass를 지정해서 pvc를 생성해 할당요청을 하면 자동으로 pv할당
+kubectl create -f pvc-nfs.yaml
+
+위에서 생성한 PersistentVolumeClaim을 이용해 pod를 생성하면 생성되어 있는 pv,pvc를 기준으로 올라간다.
+kubectl create -f 4-busybox-pv-hostpath.yaml
+
+pod를 yaml 파일로 올릴 때  pvc에 지정한 storageClassName으로 할당을 자동으로 할 수 있다.
+
+나중에 worker node를 추가할려면 해당 토큰이 24시간밖에 유효하지 않기 때문에 재 생성해서 노드를 추가해줘야 한다.
+마스터에서 kubeadm token create --print-join-command
+kubeadm join 192.168.11.102:6443 --token 6pdmn3.pemj5ff2smoqtktm     --discovery-token-ca-cert-hash XXXX
+
+=============================================================================================================================
+[VOLTDB]
+다운로드 및 구성 순서
+https://www.voltdb.com/ 오른쪽 상단의 DOWNLOAD 버튼을 틀릭하면 개인정보를 넣는 부분이 나오면 작성을 하고 저장하면
+개인정보에 작성한 메일주소로 voltdb를 다운받을 수 있는 URL를 보내준다. 해당 URL클릭해서 다운로드 하면 된다.
+
+cd /opt/
+tar -zxvf voltdb-ent-9.2.2.tar.gz
+cd voltdb-ent-9.2.2/tools/kubernetes/
+
+bash voltdb-k8s-utils.sh config_template.cfg -B
+bash voltdb-k8s-utils.sh config_template.cfg -M
+bash voltdb-k8s-utils.sh config_template.cfg -C
+bash voltdb-k8s-utils.sh config_template.cfg -S
+
+bash voltdb-k8s-utils.sh config_template.cfg -B -M -C -S
+
+-B: --build-voltdb-image Builds the VoltDB docker image using docker build
+-M: --install-configmap Installs the configmap for VoltDB init using kubectl create configmap (both init-time and run-time)
+-C: --configure-voltdb Generates a statefulset.yaml to deploy the VoltDB cluster using voltdb-statefulset.yaml as a master template
+-S: --start-voltdb Deploys the VoltDB cluster and starts the nodes using kubectl scale/create
+
+[voldtdb build시 발생하는 에러]
+1. 아래와 같이 설정하지 않은 상태에서 -B 옵션으로 build하게 되면 CLUSTER_NAME이 지정이 되어 있지 않다고 에러 발생한다.
+build하기 위해선 CLUSTER_NAME 지정을 해준 상태에서 진행해야 된다.
+export CLUSTER_NAME="voltdb"
+
+2. E:pakage 'oracle-java8-installer' has no installation candidate 이라는 에러가 발생하는데
+오라클에서 정책이 변경되어 자바가 유료화되면서 자동으로 설치할 수 없으므로 openjdk-8-jdk 로 대체한다.
+vi /opt/voltdb-ent-9.2.2/tools/kubernetes/docker/Dockerfile
+RUN echo oracle-java8-installer shared/accepted-oracle-license-v1-1 select true | sudo /usr/bin/debconf-set-selections
+RUN apt-get -y --no-install-recommends --no-install-suggests install oracle-java8-installer
+-> 대체할 명령어
+RUN apt-get -y --no-install-recommends --no-install-suggests install openjdk-8-jdk
+
+3. /bin/sh: 1: locale-gen: not found
+The command '/bin/sh -c locale-gen en_US.UTF-8' returned a non-zero code: 127
+해당 명령어 추가
+RUN apt-get clean && apt-get update && apt-get install -y locales
+
+4.Warning  Failed 1s kubelet, voltdb3n  Error: failed to start container "voltdb": 
+Error response from daemon: oci runtime error: container_linux.go:247: 
+starting container process caused "exec: \"voltdbk8s.py\": executable file not found in $PATH"
+실행권한이 없어서 발생하는 에러로 확인!
+chmod -R 755 /opt/voltdb-ent-9.2.2/tools/kubernetes/bin/
+
+config_template.cfg 에 변경이 필요한 설정
+--ignore=thp 를 적용필요(voltdb 시작할 때 thp 설정 무시하고 올라가게 해야됨)
+vi /opt/voltdb-ent-9.2.2/tools/kubernetes/config_template.cfg
+# additional voltdb start command line args
+VOLTDB_START_ARGS="--ignore=thp"
+
+deployment.xml 파일을 통해 호스트 노드수와 k-facter 설정
+# location of the VoltDB deployment xml file (optional)
+DEPLOYMENT_FILE=deployment.xml
+
+vi deployment.xml
+<deployment>
+   <cluster hostcount="4" kfactor="1"/>
+   <httpd enabled="true">
+      <jsonapi enabled="true" />
+   </httpd>
+</deployment>
+
+[yaml파일 생성 하기 전 수정 해줘야 되는 부분]
+-C 옵션으로 yaml 파일을 생성하면 CLUSTER_NAME으로 생성이 된다.
+voltdb.yaml
+해당 yaml 파일을 생성할 때 voltdb-statefulset.yaml 파일을 기준으로 생성을 하게된다.
+여기에서 주의할 점은 volumeClaimTemplates 의 하위에 storageClassName: <managed-nfs-storage>
+volumeClaimTemplates:
+- metadata:
+    name: voltdbroot
+  spec:
+    accessModes:
+    - ReadWriteOnce
+    resources:
+      requests:
+        storage: --pvolumeSize--
+    storageClassName: managed-nfs-storage <--- 해당부분에 storageClassName을 추가 해줘야 한다.
+
+=============================================================================================================================
+[구동테스트]
+1. 구동테스트를 실행할 컨테이너에 접속해서 스키마 로딩 
+kubectl exec -it <pod hostname> -- bash
+cd voltdb-ent-9.2.2/examples/voter
+../../bin/sqlcmd --servers=pod hostname < ddl.sql
+
+2. run.sh에서 수정이 필요한 부분(--servers=<pod name>)
+vi run.sh
+...
+function async-benchmark() {
+    jars-ifneeded
+    java -classpath voter-client.jar:$CLIENTCLASSPATH voter.AsyncBenchmark \
+        --displayinterval=5 \
+        --warmup=5 \
+        --duration=120 \
+        --servers=voltdb-0,voltdb-1,voltdb-2 \       
+        --contestants=6 \
+        --maxvotes=2
+}
+...
+
+(OR)
+SERVERS="localhost" -> SERVERS="voltdb-0,voltdb-1,voltdb-2"
+
+--servers=<voltdb-0,voltdb-1,voltdb-2> 부분에 voltdb-0,voltdb-1,voltdb-2에 해당하는 ip/hostname을 
+구동테스트를 실행하는 컨테이너의 /etc/hosts에 설정 해줘야 됨
+
+
+
+3. web 실행명령어
+vi run.sh 해당 설정 추가해줘야 됨 
+
+# WEB SERVER variables
+WEB_PORT=8081
+function webserver() {
+    cd web; python -m SimpleHTTPServer $WEB_PORT
+}
+
+./run.sh webserver
+
+4. 어플리케이션 실행 명령어
+./run.sh client
+
+5. web접속을 위한 voltdb 컨테이너와의 터널링 설정(http://localhost:8081)
+   - localhost <-> 컨테이너 아이피
+   - localhost:8080,8081
+   
+or
+
+6. web접속을 위한 port forwarding(http://worker node ip:8081)
+iptables -t nat -A PREROUTING -i ens33(worker node network interface) -p tcp --dport 8081 -j DNAT --to-destination 컨테이너 아이피
+
+예)
+iptables -t nat -A PREROUTING -i ens33 -p tcp --dport 8081 -j DNAT --to-destination 10.42.0.1
+iptables -t nat -A PREROUTING -i ens33 -p tcp --dport 8080 -j DNAT --to-destination 10.42.0.1
+==============================================================================================================================
+[Master node helm install]
+helm Installation
+curl -L https://git.io/get_helm.sh | bash
+
+helm version --short --client
+Client: v2.16.3+g1ee0254
+
+which helm
+/usr/local/bin/helm
+
+wget https://raw.githubusercontent.com/sangkyu-test/voltdb/master/tiller-account-rbac.yaml
+kubectl apply -f tiller-account-rbac.yaml
+
+kubectl -n kube-system get deploy,replicaset,pod,serviceaccount,clusterrolebinding | grep tiller
+serviceaccount/tiller                               1         15s
+clusterrolebinding.rbac.authorization.k8s.io/tiller                                                 15s
+
+kubectl get serviceaccount tiller -n kube-system
+NAME     SECRETS   AGE
+tiller   1         74s
+
+서버 애플리케이션이 kube-system 네임스페이스에 배포되고 tiller는 helm 명령을 사용할 수 있다.
+helm init --service-account=tiller \
+   --stable-repo-url=https://kubernetes-charts.storage.googleapis.com \
+   --upgrade \
+   --automount-service-account-token=true \
+   --replicas=1 \
+   --history-max=100 \
+   --wait
+ 
+kubectl -n kube-system get deploy,replicaset,pod,serviceaccount,clusterrolebinding | grep tiller
+deployment.apps/tiller-deploy   1/1     1            1           37s
+replicaset.apps/tiller-deploy-765b65f946   1         1         1       37s
+pod/tiller-deploy-765b65f946-2jj6j     1/1     Running   0          37s
+serviceaccount/tiller                               1         2m16s
+clusterrolebinding.rbac.authorization.k8s.io/tiller                                                 2m16s
+
+
+ls ~/.helm 
+cache  plugins  repository  starters
+
+kubectl get deployment  -n kube-system
+kubectl get deployment tiller-deploy -n kube-system -o wide
+
+helm home
+/root/.helm
+
+helm repo list
+NAME  	URL                                             
+stable	https://kubernetes-charts.storage.googleapis.com
+local 	http://127.0.0.1:8879/charts 
+
+==============================================================================================================================
+[Helm chart를 이용한 voltdb 구성]
+
+ls /root/helm/
+charts  demo  README.md  stable
+
+cd /root/helm/charts/
+helm package voltdb
+
+git add .
+git commit -m "demo chart add"
+git push origin master
+
+wget https://sangkyu-test.github.io/helm-chart-repo/voltdb-0.1.0.tgz
+tar -zxvf voltdb-0.1.0.tgz
+yum install tree
+
+cd ~/voltdb
+voltdb# tree
+.
+├── Chart.yaml
+└── templates
+    ├── configmap.yaml
+    └── service.yaml
+
+1 directory, 3 files
+
+voltdb# helm install --name voltdb .
+다운로드 받은 helm chart 파일로 voltdb 올리는 명령어
+
+해당 명령어 실행 후 pod의 상태가 계속 ContainerCreating 임을 확인
+
+ls /srv/nfs/kubedata/
+default-voltdbroot-voltdb-0-pvc-XXXX
+cd default-voltdbroot-voltdb-0-pvc-XXXX/
+
+cat voltdbk8s.log
+Warning  FailedScheduling  24m (x2 over 24m)    default-scheduler                                    error while running "VolumeBinding" filter plugin for pod "voltdb-0": pod has unbound immediate PersistentVolumeClaims
+  Normal   Scheduled         24m                  default-scheduler                                    Successfully assigned default/voltdb-0 to ip-172-31-10-88.eu-west-1.compute.internal
+  Warning  FailedMount       23m (x8 over 24m)    kubelet, ip-172-31-10-88.eu-west-1.compute.internal  MountVolume.SetUp failed for volume "voltdb-init-volume" : configmap "voltdb-init-configmap" not found
+  Warning  FailedMount       23m (x8 over 24m)    kubelet, ip-172-31-10-88.eu-west-1.compute.internal  MountVolume.SetUp failed for volume "voltdb-schema-volume" : configmap "voltdb-init-schema" not found
+  Warning  FailedMount       14m (x13 over 24m)   kubelet, ip-172-31-10-88.eu-west-1.compute.internal  MountVolume.SetUp failed for volume "voltdb-classes-volume" : configmap "voltdb-init-classes" not found
+  Warning  FailedMount       9m1s (x3 over 13m)   kubelet, ip-172-31-10-88.eu-west-1.compute.internal  Unable to attach or mount volumes: unmounted volumes=[voltdb-init-volume voltdb-classes-volume voltdb-schema-volume], unattached volumes=[voltdbroot voltdb-init-volume voltdb-classes-volume voltdb-schema-volume default-token-5vdnp]: timed out waiting for the condition
+  Warning  FailedMount       4m29s (x2 over 22m)  kubelet, ip-172-31-10-88.eu-west-1.compute.internal  Unable to attach or mount volumes: unmounted volumes=[voltdb-init-volume voltdb-classes-volume voltdb-schema-volume], unattached volumes=[default-token-5vdnp voltdbroot voltdb-init-volume voltdb-classes-volume voltdb-schema-volume]: timed out waiting for the condition
+
+위의 로그와 같이 configmap관련 에러가 발생함...
+
+예를 들면 2번의 구성이 빠진 상태라고 볼 수 있음
+1. bash voltdb-k8s-utils.sh config_template.cfg -B
+2. bash voltdb-k8s-utils.sh config_template.cfg -M (-M: --install-configmap Installs the configmap for VoltDB init using kubectl create configmap)
+3. bash voltdb-k8s-utils.sh config_template.cfg -C
+4. bash voltdb-k8s-utils.sh config_template.cfg -S
+
+지금 상태는 여기까지...
+개인적인 생각으로는 -C 옵션으로 생성된 yaml 파일에 configmap에 설정되는 값(?)들을 지정할 수 있다면 가장 좋을 것 같다.
+그런대 만약 이게 된다고 하더라도 다른 환경(voltdb 관련 configmap이 생성안된)에서 helml chart로 pod를 올릴려고 하면 
+역시 configmap 이 설정이 안되어 있으면 분명히 에러가 발생할 것이다.
+그래서 cofigmap을 생성하는 yaml파일을 생성해서 환경설정 부분도 yaml파일 실행으로 적용되게 설정했다.
+
+
+2020.02.07
+configmap
