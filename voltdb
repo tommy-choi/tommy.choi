@@ -451,3 +451,26 @@ Warning  FailedScheduling  24m (x2 over 24m)    default-scheduler               
 
 2020.02.07
 configmap
+쿠버네티스가 옳바르게 설치되어있다는 가정하에... 
+1) 처리방법
+$mkdir -p $HOME/.kube
+$sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+$sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+2) x509 에러 발생한 경우
+Unable to connect to the server: x509: certificate signed by unknown authority (possibly because of "cryify candidate authority certificate "kubernetes")
+
+[root@kuber1m kubernetes]# export KUBECONFIG=/etc/kubernetes/admin.conf
+[root@kuber1m kubernetes]# kubectl get nodes
+NAME      STATUS   ROLES    AGE   VERSION
+kuber1m   Ready    master   85s   v1.17.4
+[root@kuber1m kubernetes]#
+
+$export KUBECONFIG=/etc/kubernetes/admin.conf
+
+3) root권한에서 환경변수 등록 / 컨테이너 모두 삭제
+$docker rm $(docker ps -a -q) 
+
+3) kubelet 재시작
+$systemctl restart kubelet 
+
