@@ -51,6 +51,8 @@ systemctl enable docker && systemctl start docker
 
 kubernete master node 초기화
 kubeadm init
+kubeadm init --apiserver-advertise-address=192.168.56.150 --pod-network-cidr=10.244.0.0/16
+
 
 kubeadm init 으로 초기화를 하게 되면 마지막에 아래와 같이 토큰을 생성해주는데 이 토큰은 node join시 필요하다.
 kubeadm join 172.16.0.214:6443 --token hg5vlq.af1kg0od698goe3u --discovery-token-ca-cert-hash XXXXX
