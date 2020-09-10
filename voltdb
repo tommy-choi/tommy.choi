@@ -168,11 +168,12 @@ mount -t nfs 192.168.11.102:/srv/nfs/kubedata /tmp
 [Master node ]
 
 Statefulset 환경을 NFS로 설정하기 위한 yaml 파일 다운로드
-wget https://raw.githubusercontent.com/sangkyu-test/voltdb/master/rbac.yaml
-wget https://raw.githubusercontent.com/sangkyu-test/voltdb/master/class.yaml
-wget https://raw.githubusercontent.com/sangkyu-test/voltdb/master/deployment.yaml
-wget https://raw.githubusercontent.com/sangkyu-test/voltdb/master/pvc-nfs.yaml
-wget https://raw.githubusercontent.com/sangkyu-test/voltdb/master/4-busybox-pv-hostpath.yaml
+wget https://raw.githubusercontent.com/tommy-choi/voltdb/master/rbac.yaml
+wget https://raw.githubusercontent.com/tommy-choi/voltdb/master/class.yaml
+wget https://raw.githubusercontent.com/tommy-choi/voltdb/master/deployment.yaml
+wget https://raw.githubusercontent.com/tommy-choi/voltdb/master/pvc-nfs.yaml
+wget https://raw.githubusercontent.com/tommy-choi/voltdb/master/4-busybox-pv-hostpath.yaml
+
 
 RBAC(Role-based access control) 생성
 kubectl create -f rbac.yaml
